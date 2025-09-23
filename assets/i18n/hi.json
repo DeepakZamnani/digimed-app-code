@@ -1,0 +1,69 @@
+{
+  "checkup": {
+    "title": "मेडिकल LLM सहायक",
+    "get_suggestion": "सुझाव प्राप्त करें"
+  },
+  "quick_checkup": {
+    "debug_information": "डीबग जानकारी",
+    "error": "त्रुटि:",
+    "ai_health_assessment": "एआई स्वास्थ्य मूल्यांकन",
+    "describe_symptoms": "अपने लक्षण बताएं",
+    "choose_diseases": "कितनी बीमारियों का अनुमान लगाना है चुनें",
+    "disclaimer": "महत्वपूर्ण अस्वीकरण",
+    "test_connection": "कनेक्शन जांचें",
+    "low_match_message": "आपके लक्षणों में कम मेल प्रतिशत (${matchPercentage}%) और कम संभावना स्कोर दिखते हैं। यह संकेत करता है कि आपके लक्षण संभवतः हल्के हैं और किसी विशिष्ट बीमारी की ओर इशारा नहीं कर रहे।",
+    "recommendation": "सिफारिश: सामान्य स्वास्थ्य, आराम, हाइड्रेशन पर ध्यान दें और यदि लक्षण बने रहते हैं तो स्वास्थ्य प्रदाता से परामर्श करें।",
+    "assessment_result": "मूल्यांकन परिणाम",
+    "medical_recommendation": "चिकित्सीय सिफारिश",
+    "available_symptoms": "उपलब्ध लक्षण: ${_availableSymptoms.length}",
+    "debug_info": "डीबग जानकारी:",
+    "quick_test_symptoms": "त्वरित परीक्षण लक्षण",
+    "get_health_assessment": "स्वास्थ्य मूल्यांकन प्राप्त करें",
+    "analysis_summary": "विश्लेषण सारांश",
+    "ai_disclaimer": "यह केवल जानकारी के लिए एआई भविष्यवाणी उपकरण है। कृपया उचित चिकित्सा निदान और उपचार के लिए योग्य स्वास्थ्य विशेषज्ञ से परामर्श करें।",
+    "no_predictions": "कोई भविष्यवाणी उपलब्ध नहीं",
+    "retry_connection": "कनेक्शन पुनः प्रयास करें",
+    "recognized_symptoms": "पहचाने गए: ${_recognizedSymptoms.length} लक्षण",
+    "possible_conditions": "संभावित स्थितियां",
+    "no_disease_detected": "कोई विशेष बीमारी नहीं पाई गई",
+    "debug_mode": "त्वरित जांच - डीबग मोड",
+    "num_predictions": "भविष्यवाणियों की संख्या",
+    "basic_checkup": "बेसिक हेल्थ चेकअप",
+    "new_assessment": "नया मूल्यांकन",
+    "recommended_doctor": "सिफारिशित डॉक्टर",
+    "suggested_treatment": "सुझाई गई उपचार",
+    "health_results": "स्वास्थ्य मूल्यांकन परिणाम",
+    "reload_symptoms": "लक्षण फिर से लोड करें",
+    "based_on_symptoms": "आपके रिपोर्ट किए गए लक्षणों के आधार पर",
+    "ai_predictions": "आपके लक्षणों के आधार पर एआई भविष्यवाणियां",
+    "not_recognized_symptoms": "नहीं पहचाने गए: ${_unrecognizedSymptoms.length} लक्षण",
+    "api_url": "API: $_apiUrl",
+    "ok": "ठीक है",
+    "your_symptoms": "आपके लक्षण:"
+  },
+  "profile": {
+    "profile": "प्रोफ़ाइल",
+    "edit_profile": "प्रोफ़ाइल संपादित करें",
+    "edit_profile_coming": "प्रोफ़ाइल संपादन सुविधा जल्द ही आ रही है!",
+    "refresh_data": "डेटा रिफ्रेश करें",
+    "try_again": "पुनः प्रयास करें",
+    "oops": "उफ़!"
+  },
+  "pharma": {
+    "nearby_pharmacies": "नजदीकी फ़ार्मेसियां",
+    "finding_pharmacies": "फ़ार्मेसियां ढूंढ रहे हैं...",
+    "no_pharmacies": "नजदीक कोई फ़ार्मेसी नहीं मिली",
+    "try_again": "पुनः प्रयास करें",
+    "rating": "${place['rating']}"
+  },
+   "home": {
+    "healthcare_services": "स्वास्थ्य सेवाएँ",
+    "choose_services": "हमारी उपलब्ध सेवाओं में से चुनें",
+    "language": "भाषा",
+    "select_language": "भाषा चुनें",
+    "cancel": "रद्द करें",
+    "english": "अंग्रेज़ी",
+    "hindi": "हिंदी",
+    "user_name": "दीपक ज़ामनानी"
+  }
+}

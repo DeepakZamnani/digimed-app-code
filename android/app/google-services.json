@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "292217821555",
+    "project_id": "digimed-india-51fc8",
+    "storage_bucket": "digimed-india-51fc8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:292217821555:android:0cb6392685e12343a20d06",
+        "android_client_info": {
+          "package_name": "com.example.digimedindia"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDx_h5wi3wupcprAhJLI_fIg1ZgIMxgZi8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

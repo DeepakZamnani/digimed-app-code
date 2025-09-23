@@ -1,0 +1,72 @@
+{
+  "checkup": {
+    "title": "Medical LLM Helper",
+    "get_suggestion": "Get Suggestion"
+  },
+  "quick_checkup": {
+    "debug_information": "Debug Information",
+    "error": "Error:",
+    "ai_health_assessment": "AI Health Assessment",
+    "describe_symptoms": "Describe Your Symptoms",
+    "choose_diseases": "Choose how many diseases to predict",
+    "disclaimer": "Important Disclaimer",
+    "test_connection": "Test Connection",
+    "low_match_message": "Your symptoms show low match percentage (${matchPercentage}%) and low probability scores. This indicates your symptoms are likely mild and not pointing to any specific disease condition.",
+    "recommendation": "Recommendation: Focus on general wellness, rest, hydration, and consult a healthcare provider if symptoms persist or worsen.",
+    "assessment_result": "Assessment Result",
+    "medical_recommendation": "Medical Recommendation",
+    "available_symptoms": "Available symptoms: ${_availableSymptoms.length}",
+    "debug_info": "Debug Info:",
+    "quick_test_symptoms": "Quick Test Symptoms",
+    "get_health_assessment": "Get Health Assessment",
+    "analysis_summary": "Analysis Summary",
+    "ai_disclaimer": "This is an AI prediction tool for informational purposes only. Please consult a qualified healthcare professional for proper medical diagnosis and treatment.",
+    "no_predictions": "No predictions available",
+    "retry_connection": "Retry Connection",
+    "recognized_symptoms": "Recognized: ${_recognizedSymptoms.length} symptom(s)",
+    "possible_conditions": "Possible Conditions",
+    "no_disease_detected": "No Specific Disease Detected",
+    "debug_mode": "Quick Checkup - Debug Mode",
+    "num_predictions": "Number of Predictions",
+    "basic_checkup": "Basic Health Checkup",
+    "new_assessment": "New Assessment",
+    "recommended_doctor": "Recommended Doctor",
+    "suggested_treatment": "Suggested Treatment",
+    "health_results": "Health Assessment Results",
+    "reload_symptoms": "Reload Symptoms",
+    "based_on_symptoms": "Based on your reported symptoms",
+    "ai_predictions": "AI-powered predictions based on your symptoms",
+    "not_recognized_symptoms": "Not recognized: ${_unrecognizedSymptoms.length} symptom(s)",
+    "api_url": "API: $_apiUrl",
+    "ok": "OK",
+    "your_symptoms": "Your Symptoms:"
+  },
+  "profile": {
+    "profile": "Profile",
+    "edit_profile": "Edit Profile",
+    "edit_profile_coming": "Edit profile feature coming soon!",
+    "refresh_data": "Refresh Data",
+    "try_again": "Try Again",
+    "oops": "Oops!"
+  },
+  "pharma": {
+    "nearby_pharmacies": "Nearby Pharmacies",
+    "finding_pharmacies": "Finding pharmacies...",
+    "no_pharmacies": "No pharmacies found nearby",
+    "try_again": "Try Again",
+    "rating": "${place['rating']}"
+  }
+  ,
+  "home": {
+    "healthcare_services": "Healthcare Services",
+    "choose_services": "Choose from our available services",
+    "language": "LANGUAGE",
+    "select_language": "Select Language",
+    "cancel": "Cancel",
+    "english": "English",
+    "hindi": "Hindi",
+    "user_name": "Deepak Zamnani"
+  }
+
+
+}
