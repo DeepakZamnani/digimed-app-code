@@ -112,7 +112,9 @@ class _HomeState extends State<Home> {
                       // Add navigation logic here
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (c) => SymptomInputScreen()),
+                        MaterialPageRoute(
+                          builder: (c) => MinimalHealthCheckupScreen(),
+                        ),
                       );
                     },
                   ),

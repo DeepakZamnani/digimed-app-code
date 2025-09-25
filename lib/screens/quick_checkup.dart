@@ -2,202 +2,144 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_translate/flutter_translate.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:permission_handler/permission_handler.dart';
+import '../services/cloud_translate.dart';
 
-// First Screen - Symptom Input with Enhanced Debugging
-class SymptomInputScreen extends StatefulWidget {
+// Main Speech-to-Text Health Checkup Screen
+class MinimalHealthCheckupScreen extends StatefulWidget {
   @override
-  _SymptomInputScreenState createState() => _SymptomInputScreenState();
+  _MinimalHealthCheckupScreenState createState() =>
+      _MinimalHealthCheckupScreenState();
 }
 
-class _SymptomInputScreenState extends State<SymptomInputScreen> {
-  final TextEditingController _symptomsController = TextEditingController();
-  final TextEditingController _topNController = TextEditingController(
-    text: '5',
-  );
-  bool _isLoading = false;
-  String _apiUrl = 'https://digimed-model.onrender.com';
-  List<String> _availableSymptoms = [];
-  List<String> _recognizedSymptoms = [];
-  List<String> _unrecognizedSymptoms = [];
-  String _debugInfo = ''; // Add debug information display
+class _MinimalHealthCheckupScreenState extends State<MinimalHealthCheckupScreen>
+    with TickerProviderStateMixin {
+  // Core services
+  late stt.SpeechToText _speech;
+  late CloudTranslatorService _translator;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
-  List<String> _commonSymptoms = [
-    'fever',
-    'cough',
-    'headache',
-    'fatigue',
-    'nausea',
-    'diarrhea',
-    'chest pain',
-    'shortness of breath',
-    'dizziness',
-    'muscle pain',
-    'sore throat',
-    'runny nose',
-    'stomach pain',
-    'vomiting',
-    'joint pain',
-    'skin rash',
-  ];
+  // State variables
+  bool _isListening = false;
+  bool _isProcessing = false;
+  String _spokenText = '';
+  String _selectedLanguage = 'en';
+  String _apiUrl = 'https://digimed-model.onrender.com';
+
+  // Language options
+  final Map<String, String> _languages = {
+    'en': 'English',
+    'hi': 'हिंदी',
+    'mr': 'मराठी',
+    'gu': 'ગુજરાતી',
+    'ta': 'தமிழ்',
+    'te': 'తెలుగు',
+    'bn': 'বাংলা',
+    'ur': 'اردو',
+  };
 
   @override
   void initState() {
     super.initState();
-    _testApiConnection();
-    _fetchAvailableSymptoms();
-    _symptomsController.addListener(_validateSymptoms);
+    _initializeServices();
+    _setupAnimations();
   }
 
-  Future<void> _testApiConnection() async {
-    setState(() {
-      _debugInfo = 'Testing API connection...';
-    });
-
-    try {
-      print('Testing connection to: $_apiUrl');
-      final response = await http
-          .get(
-            Uri.parse(_apiUrl),
-            headers: {'Content-Type': 'application/json'},
-          )
-          .timeout(Duration(seconds: 10));
-
-      print('Connection test - Status: ${response.statusCode}');
-      print('Connection test - Body: ${response.body}');
-
-      setState(() {
-        _debugInfo = 'API Status: ${response.statusCode} - ${response.body}';
-      });
-    } catch (e) {
-      print('Connection test failed: $e');
-      setState(() {
-        _debugInfo = 'Connection failed: $e';
-      });
-    }
+  void _initializeServices() {
+    _speech = stt.SpeechToText();
+    const apiKey = 'AIzaSyBvyp_gnutyXIGrTJ4doodRXfP9uqzzSeU';
+    _translator = CloudTranslatorService(apiKey);
   }
 
-  Future<void> _fetchAvailableSymptoms() async {
-    try {
-      print('Fetching symptoms from: $_apiUrl/symptoms');
-      final response = await http
-          .get(
-            Uri.parse('$_apiUrl/symptoms'),
-            headers: {'Content-Type': 'application/json'},
-          )
-          .timeout(Duration(seconds: 15));
+  void _setupAnimations() {
+    _pulseController = AnimationController(
+      duration: Duration(seconds: 1),
+      vsync: this,
+    );
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
 
-      print('Symptoms response status: ${response.statusCode}');
-      print('Symptoms response body: ${response.body}');
+  Future<void> _requestPermissions() async {
+    await Permission.microphone.request();
+  }
 
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        print('Parsed symptoms result: $result');
+  Future<void> _startListening() async {
+    await _requestPermissions();
 
-        if (result['success'] == true) {
-          setState(() {
-            _availableSymptoms = List<String>.from(result['data']['symptoms']);
-            _debugInfo += '\nSymptoms loaded: ${_availableSymptoms.length}';
-          });
-          print('Available symptoms loaded: ${_availableSymptoms.length}');
-        } else {
-          setState(() {
-            _debugInfo += '\nSymptoms API returned success=false';
-          });
+    bool available = await _speech.initialize(
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
+          _stopListening();
         }
-      } else {
-        setState(() {
-          _debugInfo += '\nSymptoms API error: ${response.statusCode}';
-        });
-      }
-    } catch (e) {
-      print('Failed to fetch symptoms: $e');
-      setState(() {
-        _debugInfo += '\nSymptoms fetch error: $e';
-      });
-    }
-  }
+      },
+      onError:
+          (error) => _showError('Speech recognition error: ${error.errorMsg}'),
+    );
 
-  void _validateSymptoms() {
-    String text = _symptomsController.text;
-    if (text.isEmpty) {
-      setState(() {
-        _recognizedSymptoms.clear();
-        _unrecognizedSymptoms.clear();
-      });
-      return;
-    }
+    if (available) {
+      setState(() => _isListening = true);
+      _pulseController.repeat(reverse: true);
 
-    List<String> inputSymptoms =
-        text
-            .split(',')
-            .map((s) => s.trim().toLowerCase())
-            .where((s) => s.isNotEmpty)
-            .toList();
-
-    List<String> recognized = [];
-    List<String> unrecognized = [];
-
-    for (String symptom in inputSymptoms) {
-      bool found = false;
-
-      if (_availableSymptoms.any((s) => s.toLowerCase() == symptom)) {
-        recognized.add(symptom);
-        found = true;
-      } else {
-        for (String availableSymptom in _availableSymptoms) {
-          if ((symptom.length > 2 &&
-                  availableSymptom.toLowerCase().contains(symptom)) ||
-              (symptom.length > 2 &&
-                  symptom.contains(availableSymptom.toLowerCase()))) {
-            recognized.add(symptom);
-            found = true;
-            break;
-          }
-        }
-      }
-
-      if (!found) {
-        unrecognized.add(symptom);
-      }
-    }
-
-    setState(() {
-      _recognizedSymptoms = recognized;
-      _unrecognizedSymptoms = unrecognized;
-    });
-  }
-
-  void _addSymptom(String symptom) {
-    String currentText = _symptomsController.text.trim();
-    if (currentText.isEmpty) {
-      _symptomsController.text = symptom;
+      await _speech.listen(
+        onResult: (result) {
+          setState(() {
+            _spokenText = result.recognizedWords;
+          });
+        },
+        localeId: _getLocaleId(_selectedLanguage),
+        listenFor: Duration(seconds: 30),
+        pauseFor: Duration(seconds: 3),
+      );
     } else {
-      if (!currentText.toLowerCase().contains(symptom.toLowerCase())) {
-        _symptomsController.text = '$currentText, $symptom';
-      }
+      _showError('Speech recognition not available');
     }
   }
 
-  Future<void> _predictDisease() async {
-    if (_symptomsController.text.trim().isEmpty) {
-      _showErrorDialog(translate('quick_checkup.describe_symptoms'));
+  void _stopListening() {
+    _speech.stop();
+    setState(() => _isListening = false);
+    _pulseController.stop();
+  }
+
+  String _getLocaleId(String languageCode) {
+    final locales = {
+      'en': 'en-US',
+      'hi': 'hi-IN',
+      'mr': 'mr-IN',
+      'gu': 'gu-IN',
+      'ta': 'ta-IN',
+      'te': 'te-IN',
+      'bn': 'bn-IN',
+      'ur': 'ur-PK',
+    };
+    return locales[languageCode] ?? 'en-US';
+  }
+
+  Future<void> _processHealthCheckup() async {
+    if (_spokenText.trim().isEmpty) {
+      _showError('Please speak your symptoms first');
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _debugInfo += '\nStarting prediction...';
-    });
+    setState(() => _isProcessing = true);
 
     try {
-      final requestData = {
-        'symptoms': _symptomsController.text.trim(),
-        'top_n': int.tryParse(_topNController.text) ?? 5,
-      };
+      String symptomsInEnglish = _spokenText;
 
-      print('Sending prediction request to: $_apiUrl/predict');
-      print('Request data: $requestData');
+      // Translate to English if needed
+      if (_selectedLanguage != 'en') {
+        symptomsInEnglish = await _translator.translate(
+          _spokenText,
+          target: 'en',
+          source: _selectedLanguage,
+        );
+      }
 
+      // Get health predictions
       final response = await http
           .post(
             Uri.parse('$_apiUrl/predict'),
@@ -205,60 +147,39 @@ class _SymptomInputScreenState extends State<SymptomInputScreen> {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
-            body: json.encode(requestData),
+            body: json.encode({'symptoms': symptomsInEnglish, 'top_n': 3}),
           )
           .timeout(Duration(seconds: 30));
 
-      print('Prediction response status: ${response.statusCode}');
-      print('Prediction response headers: ${response.headers}');
-      print('Prediction response body: ${response.body}');
-
-      setState(() {
-        _debugInfo += '\nPrediction status: ${response.statusCode}';
-      });
-
       if (response.statusCode == 200) {
         final result = json.decode(response.body);
-        print('Parsed prediction result: $result');
-
-        setState(() {
-          _debugInfo += '\nPrediction success: ${result['success']}';
-        });
-
         if (result['success'] == true) {
           Navigator.push(
             context,
             MaterialPageRoute(
               builder:
-                  (context) => ResultScreen(
+                  (context) => MinimalResultScreen(
                     result: result['data'],
-                    symptoms: _symptomsController.text.trim(),
+                    originalSymptoms: _spokenText,
+                    language: _selectedLanguage,
+                    translator: _translator,
                   ),
             ),
           );
         } else {
-          _showErrorDialog(
-            result['error'] ?? translate('quick_checkup.no_predictions'),
-          );
+          _showError(result['error'] ?? 'No predictions available');
         }
       } else {
-        _showErrorDialog(
-          '${translate('quick_checkup.error')} ${response.statusCode}\nResponse: ${response.body}',
-        );
+        _showError('Server error: ${response.statusCode}');
       }
     } catch (e) {
-      print('Prediction error: $e');
-      _showErrorDialog(
-        'Connection error: $e\n\nPlease check:\n- Internet connection\n- API server status\n- Firewall settings',
-      );
+      _showError('Connection error: $e');
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isProcessing = false);
     }
   }
 
-  void _showErrorDialog(String message) {
+  void _showError(String message) {
     showDialog(
       context: context,
       builder:
@@ -266,44 +187,20 @@ class _SymptomInputScreenState extends State<SymptomInputScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            title: Text(translate('quick_checkup.debug_information')),
-            content: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    translate('quick_checkup.error'),
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(message),
-                  SizedBox(height: 16),
-                  Text(
-                    translate('quick_checkup.debug_info'),
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(_debugInfo, style: TextStyle(fontSize: 12)),
-                ],
-              ),
-            ),
+            title: Text('Error'),
+            content: Text(message),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: Text(
-                  translate('quick_checkup.ok'),
-                  style: TextStyle(color: Colors.blue),
-                ),
-              ),
-              TextButton(
-                onPressed: _testApiConnection,
-                child: Text(
-                  translate('quick_checkup.retry_connection'),
-                  style: TextStyle(color: Colors.green),
-                ),
+                child: Text('OK'),
               ),
             ],
           ),
     );
+  }
+
+  void _clearText() {
+    setState(() => _spokenText = '');
   }
 
   @override
@@ -312,538 +209,251 @@ class _SymptomInputScreenState extends State<SymptomInputScreen> {
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: Colors.white,
-        title: Text(
-          translate('quick_checkup.debug_mode'),
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
-        ),
+        backgroundColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
+          icon: Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
+        title: Text(
+          'AI Health Checkup',
+          style: TextStyle(
+            color: Colors.black87,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Debug Info Card
-            if (_debugInfo.isNotEmpty) ...[
+      body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.all(24.0),
+          child: Column(
+            children: [
+              // Language Selection
               Container(
                 width: double.infinity,
-                padding: EdgeInsets.all(16),
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.amber[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.amber[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.bug_report,
-                          color: Colors.amber[700],
-                          size: 20,
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          translate('quick_checkup.debug_information'),
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.amber[800],
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      _debugInfo,
-                      style: TextStyle(fontSize: 12, color: Colors.amber[700]),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: Offset(0, 2),
                     ),
                   ],
                 ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedLanguage,
+                    isExpanded: true,
+                    icon: Icon(Icons.language, color: Colors.blue[600]),
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    items:
+                        _languages.entries.map((entry) {
+                          return DropdownMenuItem<String>(
+                            value: entry.key,
+                            child: Text(entry.value),
+                          );
+                        }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedLanguage = value!;
+                        _spokenText = '';
+                      });
+                    },
+                  ),
+                ),
               ),
-              SizedBox(height: 16),
-            ],
 
-            // Header Section
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+              Spacer(),
+
+              // Speech-to-Text Interface
+              Column(
+                children: [
+                  // Microphone Button
+                  GestureDetector(
+                    onTap: _isListening ? _stopListening : _startListening,
+                    child: AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Transform.scale(
+                          scale: _isListening ? _pulseAnimation.value : 1.0,
+                          child: Container(
+                            width: 120,
+                            height: 120,
+                            decoration: BoxDecoration(
+                              color:
+                                  _isListening
+                                      ? Colors.red[400]
+                                      : Colors.blue[600],
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (_isListening
+                                          ? Colors.red
+                                          : Colors.blue)
+                                      .withOpacity(0.3),
+                                  blurRadius: 20,
+                                  spreadRadius: 5,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              _isListening ? Icons.mic : Icons.mic_none,
+                              color: Colors.white,
+                              size: 48,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  SizedBox(height: 24),
+
+                  // Status Text
+                  Text(
+                    _isListening
+                        ? 'Listening... Speak your symptoms'
+                        : _spokenText.isEmpty
+                        ? 'Tap microphone to speak'
+                        : 'Tap microphone to speak again',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.favorite_border,
-                          color: Colors.blue,
-                          size: 24,
-                        ),
-                      ),
-                      SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              translate('quick_checkup.ai_health_assessment'),
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              translate(
-                                'quick_checkup.api_url',
-                              ).replaceAll('\$_apiUrl', _apiUrl),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                            Text(
-                              translate(
-                                'quick_checkup.available_symptoms',
-                              ).replaceAll(
-                                '\${_availableSymptoms.length}',
-                                '${_availableSymptoms.length}',
-                              ),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
+
+              SizedBox(height: 32),
+
+              // Spoken Text Display
+              if (_spokenText.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  constraints: BoxConstraints(minHeight: 80),
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.blue[100]!),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: Offset(0, 2),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 24),
-
-            // Symptoms Input Card
-            Container(
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    translate('quick_checkup.describe_symptoms'),
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  TextField(
-                    controller: _symptomsController,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText:
-                          'Enter symptoms separated by commas (e.g., fever, cough, headache)',
-                      hintStyle: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 14,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.blue, width: 2),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                      contentPadding: EdgeInsets.all(16),
-                    ),
-                  ),
-
-                  // Symptom Validation Feedback
-                  if (_symptomsController.text.isNotEmpty) ...[
-                    SizedBox(height: 12),
-                    if (_recognizedSymptoms.isNotEmpty) ...[
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Row(
                         children: [
                           Icon(
-                            Icons.check_circle,
-                            color: Colors.green,
-                            size: 16,
+                            Icons.record_voice_over,
+                            color: Colors.blue[600],
+                            size: 20,
                           ),
                           SizedBox(width: 8),
                           Text(
-                            translate(
-                              'quick_checkup.recognized_symptoms',
-                            ).replaceAll(
-                              '\${_recognizedSymptoms.length}',
-                              '${_recognizedSymptoms.length}',
-                            ),
+                            'Your Symptoms',
                             style: TextStyle(
-                              color: Colors.green[700],
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blue[700],
                             ),
+                          ),
+                          Spacer(),
+                          IconButton(
+                            onPressed: _clearText,
+                            icon: Icon(
+                              Icons.clear,
+                              color: Colors.grey[400],
+                              size: 20,
+                            ),
+                            constraints: BoxConstraints(),
+                            padding: EdgeInsets.zero,
                           ),
                         ],
                       ),
-                      SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children:
-                            _recognizedSymptoms
-                                .map(
-                                  (symptom) => Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green[50],
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: Colors.green[200]!,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      symptom,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.green[700],
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                      ),
-                    ],
-                    if (_unrecognizedSymptoms.isNotEmpty) ...[
                       SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(Icons.warning, color: Colors.orange, size: 16),
-                          SizedBox(width: 8),
-                          Text(
-                            translate(
-                              'quick_checkup.not_recognized_symptoms',
-                            ).replaceAll(
-                              '\${_unrecognizedSymptoms.length}',
-                              '${_unrecognizedSymptoms.length}',
-                            ),
-                            style: TextStyle(
-                              color: Colors.orange[700],
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        _spokenText,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.black87,
+                          height: 1.4,
+                        ),
                       ),
                     ],
-                  ],
-                ],
-              ),
-            ),
-
-            SizedBox(height: 20),
-
-            // Test Buttons Row
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _testApiConnection,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange[600],
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      translate('quick_checkup.test_connection'),
-                      style: TextStyle(color: Colors.white),
-                    ),
                   ),
                 ),
-                SizedBox(width: 12),
-                Expanded(
+                SizedBox(height: 24),
+              ],
+
+              Spacer(),
+
+              // Process Button
+              if (_spokenText.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  height: 56,
                   child: ElevatedButton(
-                    onPressed: _fetchAvailableSymptoms,
+                    onPressed: _isProcessing ? null : _processHealthCheckup,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purple[600],
+                      backgroundColor: Colors.blue[600],
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
                       ),
+                      elevation: 0,
+                      shadowColor: Colors.blue.withOpacity(0.3),
                     ),
-                    child: Text(
-                      translate('quick_checkup.reload_symptoms'),
-                      style: TextStyle(color: Colors.white),
-                    ),
+                    child:
+                        _isProcessing
+                            ? SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                            : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.psychology,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                                SizedBox(width: 12),
+                                Text(
+                                  'Analyze Health',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
                   ),
                 ),
               ],
-            ),
 
-            SizedBox(height: 20),
-
-            // Common Symptoms Card (shortened for debug version)
-            Container(
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    translate('quick_checkup.quick_test_symptoms'),
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children:
-                        _commonSymptoms.take(6).map((symptom) {
-                          bool isSelected = _symptomsController.text
-                              .toLowerCase()
-                              .contains(symptom.toLowerCase());
-                          return Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: () => _addSymptom(symptom),
-                              child: Container(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isSelected
-                                          ? Colors.blue[50]
-                                          : Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color:
-                                        isSelected
-                                            ? Colors.blue[300]!
-                                            : Colors.grey[300]!,
-                                  ),
-                                ),
-                                child: Text(
-                                  symptom,
-                                  style: TextStyle(
-                                    color:
-                                        isSelected
-                                            ? Colors.blue[700]
-                                            : Colors.grey[700],
-                                    fontWeight:
-                                        isSelected
-                                            ? FontWeight.w600
-                                            : FontWeight.w500,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                  ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 20),
-
-            // Settings Card
-            Container(
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.purple.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(Icons.tune, color: Colors.purple, size: 20),
-                  ),
-                  SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          translate('quick_checkup.num_predictions'),
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          translate('quick_checkup.choose_diseases'),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    width: 70,
-                    child: TextField(
-                      controller: _topNController,
-                      keyboardType: TextInputType.number,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: Colors.blue),
-                        ),
-                        filled: true,
-                        fillColor: Colors.grey[50],
-                        contentPadding: EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 32),
-
-            // Predict Button
-            Container(
-              width: double.infinity,
-              height: 56,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.blue.withOpacity(0.3),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _predictDisease,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  elevation: 0,
-                ),
-                child:
-                    _isLoading
-                        ? SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                        : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.search, color: Colors.white, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              translate('quick_checkup.get_health_assessment'),
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-              ),
-            ),
-
-            SizedBox(height: 20),
-          ],
+              SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
@@ -851,911 +461,407 @@ class _SymptomInputScreenState extends State<SymptomInputScreen> {
 
   @override
   void dispose() {
-    _symptomsController.dispose();
-    _topNController.dispose();
+    _pulseController.dispose();
+    _speech.cancel();
     super.dispose();
   }
 }
 
-// Second Screen - Results with Enhanced Design
-class ResultScreen extends StatelessWidget {
+// Minimal Results Screen
+class MinimalResultScreen extends StatefulWidget {
   final Map<String, dynamic> result;
-  final String symptoms;
+  final String originalSymptoms;
+  final String language;
+  final CloudTranslatorService translator;
 
-  const ResultScreen({Key? key, required this.result, required this.symptoms})
-    : super(key: key);
+  const MinimalResultScreen({
+    Key? key,
+    required this.result,
+    required this.originalSymptoms,
+    required this.language,
+    required this.translator,
+  }) : super(key: key);
 
-  Color _getSeverityColor(String severity) {
-    switch (severity.toLowerCase()) {
-      case 'critical':
-        return Colors.red[600]!;
-      case 'high':
-        return Colors.orange[600]!;
-      case 'moderate':
-        return Colors.yellow[700]!;
-      case 'low':
-        return Colors.green[600]!;
-      default:
-        return Colors.grey[600]!;
+  @override
+  _MinimalResultScreenState createState() => _MinimalResultScreenState();
+}
+
+class _MinimalResultScreenState extends State<MinimalResultScreen> {
+  Map<String, String> _translations = {};
+  bool _isTranslating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.language != 'en') {
+      _translateContent();
     }
   }
 
-  IconData _getSeverityIcon(String severity) {
-    switch (severity.toLowerCase()) {
-      case 'critical':
-        return Icons.warning;
-      case 'high':
-        return Icons.priority_high;
-      case 'moderate':
-        return Icons.info;
-      case 'low':
-        return Icons.check_circle;
-      default:
-        return Icons.help;
+  Future<void> _translateContent() async {
+    setState(() => _isTranslating = true);
+
+    try {
+      final predictions = widget.result['predictions'] as List<dynamic>? ?? [];
+      final textsToTranslate = <String>[];
+      final keys = <String>[];
+
+      for (int i = 0; i < predictions.length; i++) {
+        final prediction = predictions[i];
+        keys.add('disease_$i');
+        textsToTranslate.add(prediction['disease'] ?? '');
+
+        keys.add('treatment_$i');
+        textsToTranslate.add(prediction['treatment'] ?? '');
+
+        keys.add('recommendation_$i');
+        textsToTranslate.add(prediction['recommendation'] ?? '');
+      }
+
+      if (textsToTranslate.isNotEmpty) {
+        final translatedTexts = await widget.translator.translateBatch(
+          textsToTranslate,
+          target: widget.language,
+          source: 'en',
+        );
+
+        final translationMap = <String, String>{};
+        for (int i = 0; i < keys.length; i++) {
+          translationMap[keys[i]] = translatedTexts[i];
+        }
+
+        setState(() => _translations = translationMap);
+      }
+    } catch (e) {
+      print('Translation error: $e');
+    } finally {
+      setState(() => _isTranslating = false);
     }
   }
 
-  // Helper method to check if all probabilities are less than 50%
+  String _getTranslatedText(String key, String fallback) {
+    return _translations[key] ?? fallback;
+  }
+
   bool _allProbabilitiesLow(List<dynamic> predictions) {
     if (predictions.isEmpty) return true;
-
     for (var prediction in predictions) {
       final prob = prediction['probability'] ?? 0.0;
-      if ((prob * 100) >= 50) {
-        return false;
-      }
+      if ((prob * 100) >= 50) return false;
     }
     return true;
   }
 
   @override
   Widget build(BuildContext context) {
-    final predictions = result['predictions'] as List<dynamic>? ?? [];
-    final analysis = result['analysis'] as Map<String, dynamic>? ?? {};
+    final predictions = widget.result['predictions'] as List<dynamic>? ?? [];
+    final analysis = widget.result['analysis'] as Map<String, dynamic>? ?? {};
     final matchPercentage = analysis['match_percentage'] ?? 0;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: Colors.white,
-        title: Text(
-          translate('quick_checkup.health_results'),
-          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
-        ),
+        backgroundColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
+          icon: Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
+        title: Text(
+          'Health Analysis',
+          style: TextStyle(
+            color: Colors.black87,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Analysis Summary Card
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.blue[50]!, Colors.blue[100]!],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+      body:
+          _isTranslating
+              ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: Colors.blue[600]),
+                    SizedBox(height: 16),
+                    Text(
+                      'Translating results...',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  ],
                 ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.blue[600],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.analytics,
-                          color: Colors.white,
-                          size: 24,
-                        ),
+              )
+              : SingleChildScrollView(
+                padding: EdgeInsets.all(24.0),
+                child: Column(
+                  children: [
+                    // Symptoms Card
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.blue[100]!),
                       ),
-                      SizedBox(width: 16),
-                      Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Your Symptoms',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blue[800],
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            widget.originalSymptoms,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.blue[700],
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    SizedBox(height: 20),
+
+                    // Results
+                    if (matchPercentage < 50 &&
+                        _allProbabilitiesLow(predictions)) ...[
+                      // Low confidence result
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.green[50],
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.green[200]!),
+                        ),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            Icon(
+                              Icons.health_and_safety,
+                              color: Colors.green[600],
+                              size: 48,
+                            ),
+                            SizedBox(height: 16),
                             Text(
-                              translate('quick_checkup.analysis_summary'),
+                              'General Health Check',
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.blue[800],
+                                color: Colors.green[800],
                               ),
                             ),
+                            SizedBox(height: 8),
                             Text(
-                              translate('quick_checkup.based_on_symptoms'),
+                              'No specific conditions detected. Consider consulting a doctor for routine checkup.',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.blue[600],
+                                color: Colors.green[700],
                               ),
+                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildSummaryCard(
-                          'Symptoms Provided',
-                          '${analysis['symptoms_provided'] ?? 0}',
-                          Icons.list,
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: _buildSummaryCard(
-                          'Recognized',
-                          '${analysis['symptoms_recognized'] ?? 0}',
-                          Icons.check_circle,
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: _buildSummaryCard(
-                          'Match Rate',
-                          '${matchPercentage}%',
-                          Icons.analytics,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          translate('quick_checkup.your_symptoms'),
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.blue[800],
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          symptoms,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.blue[700],
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 24),
-
-            // Check if both match percentage and all probabilities are less than 50%
-            if (matchPercentage < 50 && _allProbabilitiesLow(predictions)) ...[
-              // Show ONLY "Basic Checkup" - NO disease predictions at all
-              Container(
-                width: double.infinity,
-                padding: EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.green[50]!, Colors.green[100]!],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
-                      spreadRadius: 1,
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: Colors.green[600],
-                        borderRadius: BorderRadius.circular(40),
-                      ),
-                      child: Icon(
-                        Icons.health_and_safety,
-                        color: Colors.white,
-                        size: 40,
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    Text(
-                      translate('quick_checkup.basic_checkup'),
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green[800],
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      translate('quick_checkup.no_disease_detected'),
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green[700],
-                      ),
-                    ),
-                    SizedBox(height: 16),
-                    Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.info_outline,
-                                color: Colors.green[700],
-                                size: 20,
+                    ] else if (predictions.isNotEmpty) ...[
+                      // Show top prediction only
+                      ...predictions.take(1).map((prediction) {
+                        final index = predictions.indexOf(prediction);
+                        return Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: Offset(0, 2),
                               ),
-                              SizedBox(width: 8),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Disease name
                               Text(
-                                translate('quick_checkup.assessment_result'),
+                                _getTranslatedText(
+                                  'disease_$index',
+                                  prediction['disease'] ?? '',
+                                ).toUpperCase(),
                                 style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.green[800],
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              SizedBox(height: 16),
+
+                              // Probability
+                              Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[50],
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  'Probability: ${(prediction['probability'] * 100).toStringAsFixed(1)}%',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blue[700],
+                                  ),
+                                ),
+                              ),
+
+                              SizedBox(height: 20),
+
+                              // Treatment
+                              Container(
+                                padding: EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.green[50],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.green[200]!),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Treatment',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.green[800],
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(
+                                      _getTranslatedText(
+                                        'treatment_$index',
+                                        prediction['treatment'] ?? '',
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.green[700],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              SizedBox(height: 16),
+
+                              // Recommendation
+                              Container(
+                                padding: EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber[50],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.amber[200]!),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Recommendation',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.amber[800],
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(
+                                      _getTranslatedText(
+                                        'recommendation_$index',
+                                        prediction['recommendation'] ?? '',
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.amber[700],
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
-                          SizedBox(height: 12),
-                          Text(
-                            translate(
-                              'quick_checkup.low_match_message',
-                            ).replaceAll(
-                              '\${matchPercentage}',
-                              '$matchPercentage',
-                            ),
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.green[700],
-                              height: 1.4,
-                            ),
-                            textAlign: TextAlign.center,
+                        );
+                      }).toList(),
+                    ],
+
+                    SizedBox(height: 24),
+
+                    // Disclaimer
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red[200]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            color: Colors.red[600],
+                            size: 20,
                           ),
-                          SizedBox(height: 16),
-                          Container(
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.blue[50],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue[200]!),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.lightbulb_outline,
-                                  color: Colors.blue[600],
-                                  size: 18,
-                                ),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    translate('quick_checkup.recommendation'),
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.blue[700],
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'This is not a medical diagnosis. Consult a healthcare professional for proper medical advice.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.red[700],
+                              ),
                             ),
                           ),
                         ],
+                      ),
+                    ),
+
+                    SizedBox(height: 24),
+
+                    // New Assessment Button
+                    Container(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue[600],
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: Text(
+                          'New Assessment',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-            ] else if (predictions.isEmpty) ...[
-              // Show no predictions available
-              Center(
-                child: Container(
-                  padding: EdgeInsets.all(40),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        spreadRadius: 1,
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
-                      SizedBox(height: 16),
-                      Text(
-                        translate('quick_checkup.no_predictions'),
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ] else ...[
-              // Show predictions (match percentage >= 50%)
-              Text(
-                translate('quick_checkup.possible_conditions'),
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                translate('quick_checkup.ai_predictions'),
-                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-              ),
-              SizedBox(height: 20),
-
-              // Predictions List
-              ...predictions.asMap().entries.map((entry) {
-                final index = entry.key;
-                final prediction = entry.value as Map<String, dynamic>;
-
-                return Container(
-                  margin: EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        spreadRadius: 1,
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () {
-                        // Could add detailed view here
-                      },
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Header with rank and disease name
-                            Row(
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color:
-                                        index == 0
-                                            ? Colors.blue[600]
-                                            : Colors.grey[400],
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '${index + 1}',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        (prediction['disease'] as String)
-                                            .toUpperCase(),
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            _getSeverityIcon(
-                                              prediction['severity'] ?? '',
-                                            ),
-                                            color: _getSeverityColor(
-                                              prediction['severity'] ?? '',
-                                            ),
-                                            size: 16,
-                                          ),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            prediction['severity'] ?? 'Unknown',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              color: _getSeverityColor(
-                                                prediction['severity'] ?? '',
-                                              ),
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_forward_ios,
-                                  color: Colors.grey[400],
-                                  size: 16,
-                                ),
-                              ],
-                            ),
-
-                            SizedBox(height: 20),
-
-                            // Metrics Row
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _buildMetricCard(
-                                    'Probability',
-                                    '${(prediction['probability'] * 100).toStringAsFixed(1)}%',
-                                    Colors.blue,
-                                    Icons.trending_up,
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: _buildMetricCard(
-                                    'Confidence',
-                                    prediction['confidence'] ?? 'Unknown',
-                                    Colors.green,
-                                    Icons.verified,
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: _buildMetricCard(
-                                    'Risk Level',
-                                    '${prediction['risk_percentage']}%',
-                                    _getSeverityColor(
-                                      prediction['severity'] ?? '',
-                                    ),
-                                    Icons.warning_amber,
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                            SizedBox(height: 20),
-
-                            // Doctor and Treatment Section
-                            Container(
-                              padding: EdgeInsets.all(20),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 36,
-                                        height: 36,
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            18,
-                                          ),
-                                        ),
-                                        child: Icon(
-                                          Icons.local_hospital,
-                                          color: Colors.blue[600],
-                                          size: 18,
-                                        ),
-                                      ),
-                                      SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              translate(
-                                                'quick_checkup.recommended_doctor',
-                                              ),
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                            Text(
-                                              prediction['recommended_doctor'] ??
-                                                  'General Practitioner',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: Colors.grey[700],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  SizedBox(height: 16),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 36,
-                                        height: 36,
-                                        decoration: BoxDecoration(
-                                          color: Colors.green.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            18,
-                                          ),
-                                        ),
-                                        child: Icon(
-                                          Icons.medication,
-                                          color: Colors.green[600],
-                                          size: 18,
-                                        ),
-                                      ),
-                                      SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              translate(
-                                                'quick_checkup.suggested_treatment',
-                                              ),
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                            Text(
-                                              prediction['treatment'] ??
-                                                  'Consult doctor',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: Colors.grey[700],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            SizedBox(height: 16),
-
-                            // Recommendation
-                            Container(
-                              width: double.infinity,
-                              padding: EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.amber[50],
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.amber[200]!),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.lightbulb_outline,
-                                    color: Colors.amber[700],
-                                    size: 20,
-                                  ),
-                                  SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          translate(
-                                            'quick_checkup.medical_recommendation',
-                                          ),
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.amber[800],
-                                          ),
-                                        ),
-                                        SizedBox(height: 4),
-                                        Text(
-                                          prediction['recommendation'] ??
-                                              'Consult a healthcare professional',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.amber[700],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ],
-
-            SizedBox(height: 32),
-
-            // Disclaimer Card
-            Container(
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.red[50],
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.red[200]!),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 1,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.red[600], size: 24),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          translate('quick_checkup.disclaimer'),
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.red[800],
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          translate('quick_checkup.ai_disclaimer'),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.red[700],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 24),
-
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey[600],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.arrow_back, color: Colors.white, size: 18),
-                          SizedBox(width: 8),
-                          Text(
-                            translate('quick_checkup.new_assessment'),
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(width: 16),
-                Expanded(
-                  child: Container(
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        // Could add functionality to share results or book appointment
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            (matchPercentage < 50 &&
-                                    _allProbabilitiesLow(predictions))
-                                ? Colors.blue[600]
-                                : Colors.green[600],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            (matchPercentage < 50 &&
-                                    _allProbabilitiesLow(predictions))
-                                ? Icons.health_and_safety
-                                : Icons.calendar_today,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            (matchPercentage < 50 &&
-                                    _allProbabilitiesLow(predictions))
-                                ? 'General Checkup'
-                                : 'Book Appointment',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryCard(String label, String value, IconData icon) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.8),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: Colors.blue[700], size: 20),
-          SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.blue[800],
-            ),
-          ),
-          SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(fontSize: 12, color: Colors.blue[600]),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetricCard(
-    String label,
-    String value,
-    Color color,
-    IconData icon,
-  ) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 18),
-          SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              color: color,
-              fontWeight: FontWeight.bold,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(fontSize: 11, color: color.withOpacity(0.8)),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
     );
   }
 }
