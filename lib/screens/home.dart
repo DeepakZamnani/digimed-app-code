@@ -4,6 +4,7 @@ import 'package:digimedindia/screens/quick_checkup.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_translate/flutter_translate.dart';
+import 'prescription_pharma/upload_prescription.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -138,7 +139,9 @@ class _HomeState extends State<Home> {
                     () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (ctz) => NearbyPharmacies()),
+                        MaterialPageRoute(
+                          builder: (ctz) => PrescriptionScanner(),
+                        ),
                       );
                     },
                   ),

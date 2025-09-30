@@ -1,9 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_translate/flutter_translate.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/cloud_translate.dart';
 
 // Main Speech-to-Text Health Checkup Screen
@@ -489,6 +492,7 @@ class MinimalResultScreen extends StatefulWidget {
 class _MinimalResultScreenState extends State<MinimalResultScreen> {
   Map<String, String> _translations = {};
   bool _isTranslating = false;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -543,13 +547,247 @@ class _MinimalResultScreenState extends State<MinimalResultScreen> {
     return _translations[key] ?? fallback;
   }
 
-  bool _allProbabilitiesLow(List<dynamic> predictions) {
-    if (predictions.isEmpty) return true;
+  double _getHighestProbability(List<dynamic> predictions) {
+    if (predictions.isEmpty) return 0.0;
+    double highest = 0.0;
     for (var prediction in predictions) {
       final prob = prediction['probability'] ?? 0.0;
-      if ((prob * 100) >= 50) return false;
+      if (prob > highest) highest = prob;
     }
-    return true;
+    return highest * 100;
+  }
+
+  Widget _buildRecommendationCard(double probability) {
+    String title;
+    String description;
+    Color backgroundColor;
+    Color borderColor;
+    Color textColor;
+    IconData icon;
+
+    if (probability < 20) {
+      title = 'Self Care & Precautions';
+      description =
+          'Low probability detected. Focus on general health precautions, rest, and monitor symptoms.';
+      backgroundColor = Colors.green[50]!;
+      borderColor = Colors.green[200]!;
+      textColor = Colors.green[700]!;
+      icon = Icons.self_improvement;
+    } else if (probability <= 50) {
+      title = 'Clinic Visit Recommended';
+      description =
+          'Moderate probability detected. Schedule a clinic visit for proper examination and guidance.';
+      backgroundColor = Colors.orange[50]!;
+      borderColor = Colors.orange[200]!;
+      textColor = Colors.orange[700]!;
+      icon = Icons.local_hospital;
+    } else {
+      title = 'Immediate Medical Attention';
+      description =
+          'High probability detected. Seek immediate medical attention from a healthcare professional.';
+      backgroundColor = Colors.red[50]!;
+      borderColor = Colors.red[200]!;
+      textColor = Colors.red[700]!;
+      icon = Icons.emergency;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: textColor, size: 32),
+          SizedBox(height: 12),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 8),
+          Text(
+            description,
+            style: TextStyle(fontSize: 14, color: textColor),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveHealthData() async {
+    setState(() => _isSaving = true);
+
+    try {
+      final predictions = widget.result['predictions'] as List<dynamic>? ?? [];
+      final highestProbability = _getHighestProbability(predictions);
+
+      await FirebaseFirestore.instance.collection('health_checkups').add({
+        'symptoms': widget.originalSymptoms,
+        'language': widget.language,
+        'predictions':
+            predictions
+                .map(
+                  (p) => {
+                    'disease': p['disease'],
+                    'probability': p['probability'],
+                    'treatment': p['treatment'],
+                    'recommendation': p['recommendation'],
+                  },
+                )
+                .toList(),
+        'highest_probability': highestProbability,
+        'analysis': widget.result['analysis'],
+        'timestamp': FieldValue.serverTimestamp(),
+        'user_id': 'current_user_id', // Replace with actual user ID
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Health data saved successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to save data: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _shareHealthData() async {
+    try {
+      final predictions = widget.result['predictions'] as List<dynamic>? ?? [];
+      final highestProbability = _getHighestProbability(predictions);
+
+      String shareText = 'Health Analysis Report\n\n';
+      shareText += 'Symptoms: ${widget.originalSymptoms}\n\n';
+
+      if (predictions.isNotEmpty) {
+        final topPrediction = predictions.first;
+        shareText += 'Top Prediction:\n';
+        shareText += 'Condition: ${topPrediction['disease']}\n';
+        shareText +=
+            'Probability: ${(topPrediction['probability'] * 100).toStringAsFixed(1)}%\n\n';
+        shareText += 'Treatment: ${topPrediction['treatment']}\n\n';
+        shareText += 'Recommendation: ${topPrediction['recommendation']}\n\n';
+      }
+
+      shareText += 'Generated by AI Health Checkup App\n';
+      shareText +=
+          'Note: This is not a medical diagnosis. Consult a healthcare professional.';
+
+      await Share.share(shareText, subject: 'Health Analysis Report');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to share data: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _bookAppointment() async {
+    try {
+      final predictions = widget.result['predictions'] as List<dynamic>? ?? [];
+      final topPrediction = predictions.isNotEmpty ? predictions.first : null;
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder:
+            (context) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Colors.blue[600]),
+                  SizedBox(height: 16),
+                  Text('Booking appointment...'),
+                ],
+              ),
+            ),
+      );
+
+      // Create appointment data
+      final appointmentData = {
+        'patient_id': 'current_user_id', // Replace with actual user ID
+        'patient_name': 'Patient Name', // Get from user profile
+        'patient_phone': '+1234567890', // Get from user profile
+        'symptoms': widget.originalSymptoms,
+        'predicted_condition':
+            topPrediction?['disease'] ?? 'General consultation',
+        'probability': topPrediction?['probability'] ?? 0.0,
+        'status': 'pending',
+        'created_at': FieldValue.serverTimestamp(),
+        'scheduled_date': null,
+        'doctor_id': null,
+      };
+
+      // Save to Firestore
+      final docRef = await FirebaseFirestore.instance
+          .collection('appointments')
+          .add(appointmentData);
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      // Show success message
+      showDialog(
+        context: context,
+        builder:
+            (context) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Text('Appointment Booked'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Your appointment has been scheduled successfully.'),
+                  SizedBox(height: 12),
+                  Text(
+                    'Appointment ID: ${docRef.id.substring(0, 8).toUpperCase()}',
+                  ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('OK'),
+                ),
+              ],
+            ),
+      );
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.canPop(context)) Navigator.pop(context);
+
+      // Show error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to book appointment: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -557,6 +795,7 @@ class _MinimalResultScreenState extends State<MinimalResultScreen> {
     final predictions = widget.result['predictions'] as List<dynamic>? ?? [];
     final analysis = widget.result['analysis'] as Map<String, dynamic>? ?? {};
     final matchPercentage = analysis['match_percentage'] ?? 0;
+    final highestProbability = _getHighestProbability(predictions);
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -631,47 +870,13 @@ class _MinimalResultScreenState extends State<MinimalResultScreen> {
 
                     SizedBox(height: 20),
 
+                    // Recommendation based on probability
+                    _buildRecommendationCard(highestProbability),
+
+                    SizedBox(height: 20),
+
                     // Results
-                    if (matchPercentage < 50 &&
-                        _allProbabilitiesLow(predictions)) ...[
-                      // Low confidence result
-                      Container(
-                        width: double.infinity,
-                        padding: EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.green[50],
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.green[200]!),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.health_and_safety,
-                              color: Colors.green[600],
-                              size: 48,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
-                              'General Health Check',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green[800],
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'No specific conditions detected. Consider consulting a doctor for routine checkup.',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.green[700],
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ] else if (predictions.isNotEmpty) ...[
+                    if (predictions.isNotEmpty) ...[
                       // Show top prediction only
                       ...predictions.take(1).map((prediction) {
                         final index = predictions.indexOf(prediction);
@@ -805,6 +1010,135 @@ class _MinimalResultScreenState extends State<MinimalResultScreen> {
 
                     SizedBox(height: 24),
 
+                    // Action buttons based on probability
+                    if (highestProbability >= 20) ...[
+                      Container(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: _bookAppointment,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
+                                highestProbability > 50
+                                    ? Colors.red[600]
+                                    : Colors.orange[600],
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.calendar_today,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Book Appointment',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                    ],
+
+                    // Save and Share buttons row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: _isSaving ? null : _saveHealthData,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue[600],
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 0,
+                              ),
+                              child:
+                                  _isSaving
+                                      ? SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                      : Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.save,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Save Data',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Container(
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: _bookAppointment,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green[600],
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 0,
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.person,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Book Appointment',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    SizedBox(height: 24),
+
                     // Disclaimer
                     Container(
                       padding: EdgeInsets.all(16),
@@ -840,21 +1174,20 @@ class _MinimalResultScreenState extends State<MinimalResultScreen> {
                     Container(
                       width: double.infinity,
                       height: 50,
-                      child: ElevatedButton(
+                      child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[600],
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.blue[600]!),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 0,
                         ),
                         child: Text(
                           'New Assessment',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: Colors.white,
+                            color: Colors.blue[600],
                           ),
                         ),
                       ),
